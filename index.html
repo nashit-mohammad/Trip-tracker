@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trip Tracker</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--text:#14171a;--mute:#6b7280;--acc:#2563eb;--go:#16a34a;--stop:#dc2626;--line:#e5e7eb;--route:#2563eb;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1115;--card:#1a1d24;--text:#f1f3f5;--mute:#9aa3af;--acc:#60a5fa;--line:#2a2f3a;--route:#60a5fa}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+body{max-width:520px;margin:0 auto;padding:16px 16px 90px}
+h1{font-size:22px;margin:4px 0 14px}
+.card{background:var(--card);border-radius:16px;padding:14px;margin-bottom:12px;border:1px solid var(--line)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
+.stat b{display:block;font-size:26px;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
+.big b{font-size:48px}
+.btn{width:100%;border:0;border-radius:14px;padding:16px;font-size:18px;font-weight:600;color:#fff;background:var(--go);margin:4px 0 12px}
+.btn.stop{background:var(--stop)}
+.map{width:100%;height:260px;border-radius:12px;background:var(--bg);display:block}
+nav{z-index:10;position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{flex:1;padding:14px;border:0;background:none;color:var(--mute);font-size:15px;font-weight:600}
+nav button.on{color:var(--acc)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.trip{padding:12px 0;border-bottom:1px solid var(--line)}
+.trip:last-child{border:0}
+.mute{color:var(--mute);font-size:13px}
+.sm{border:1px solid var(--line);background:none;color:var(--text);border-radius:10px;padding:6px 10px;font-size:13px}
+.hide{display:none}
+#lmap,#lmap2{position:relative;z-index:0}
+.evrow{display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line);font-size:14px}
+.evdot{width:12px;height:12px;border-radius:50%;flex:none}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(72px + env(safe-area-inset-bottom,0px));background:var(--text);color:var(--bg);padding:13px 14px;border-radius:12px;font-size:15px;font-weight:600;text-align:center;z-index:20;box-shadow:0 4px 16px rgba(0,0,0,.3)}
+.msg{font-size:13px;color:var(--mute);margin:6px 0}
+</style>
+</head>
+<body>
+<h1>🚗 Trip Tracker</h1>
+
+<section id="v-track">
+  <button class="btn" id="go">Start trip</button>
+  <div class="row card" style="padding:10px 14px"><span>Auto-detect trips</span><button class="sm" id="auto">Off</button></div>
+  <div class="msg" id="msg"></div>
+  <div class="msg" id="gps"></div>
+  <div class="msg" id="wl"></div>
+  <div class="card hide" id="bk-remind"><b>Time to back up</b><p class="mute" id="bk-remind-t"></p><div class="row" style="gap:8px;justify-content:flex-start"><button class="sm" id="bk-now">Back up now</button><button class="sm" id="bk-later">Later</button></div></div>
+  <div class="card hide" id="perm"><b>Location access is off</b><p class="mute" id="perm-steps"></p><div class="row" style="gap:8px"><button class="sm" id="perm-retry">I've turned it on, try again</button><button class="sm" id="perm-close">Close</button></div></div>
+  <div class="stat big" style="margin-bottom:10px"><span>Speed</span><b id="spd">0</b><span id="u1">km/h</span></div>
+  <div class="grid" style="margin-bottom:12px">
+    <div class="stat"><span>Time</span><b id="tm">0:00</b></div>
+    <div class="stat"><span>Distance</span><b id="ds">0.0</b></div>
+    <div class="stat"><span>Avg speed</span><b id="av">0</b></div>
+    <div class="stat"><span>Max speed</span><b id="mx">0</b></div>
+  </div>
+  <div class="msg" id="evlive"></div>
+  <div class="card"><div id="lmap" class="map hide"></div><svg id="map" class="map" viewBox="0 0 400 260"></svg></div>
+</section>
+
+<section id="v-trips" class="hide">
+  <div class="card hide" id="detail">
+    <div class="row"><b id="dt-title"></b><button class="sm" id="dt-close">Close</button></div>
+    <div id="lmap2" class="map hide" style="margin:10px 0"></div>
+    <svg id="map2" class="map" viewBox="0 0 400 260" style="margin:10px 0"></svg>
+    <div id="dt-score"></div>
+    <div class="grid" id="dt-stats"></div>
+    <div id="dt-bands"></div>
+    <div id="dt-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px"></div>
+    <div id="dt-ev"></div>
+  </div>
+  <div id="flt" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
+  <div class="grid hide" id="sum" style="margin-bottom:12px"></div>
+  <div class="card" id="list"></div>
+</section>
+
+<section id="v-acct" class="hide">
+  <div class="card">
+    <b>Storage</b>
+    <p class="mute">You're not signed in. Trips are saved on this phone only (in this browser).</p>
+    <p class="mute">iCloud sign-in isn't available: it needs an Apple Developer account and server setup. Instead, export a backup file and save it to iCloud Drive from the share sheet, then import it on any device.</p>
+    <div class="mute" id="bk-info"></div>
+    <div class="row" style="gap:8px;margin-top:8px;justify-content:flex-start">
+      <button class="sm" id="exp">Export backup</button>
+      <button class="sm" id="imp">Import backup</button>
+      <input type="file" id="impf" accept=".json,application/json" class="hide">
+    </div>
+    <div class="msg" id="bk-msg"></div>
+    <p class="mute" style="margin-top:14px">Safety events are detected from GPS: hard braking, hard acceleration, sharp turns, and speeding above your alert speed for 3+ seconds. Real road speed limits aren't available, so set the alert to suit you.</p>
+    <div class="row"><span>Speed alert (<span id="lim-u">km/h</span>, 0 = off)</span><input id="lim" type="number" min="0" max="300" inputmode="numeric" style="width:80px;padding:6px 8px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px"></div>
+    <div class="row" style="margin-top:14px"><span>Units</span><button class="sm" id="unit">km/h</button></div>
+  </div>
+</section>
+
+<div class="toast hide" id="toast"></div>
+<nav>
+  <button data-v="track" class="on">Track</button>
+  <button data-v="trips">Trips</button>
+  <button data-v="acct">Account</button>
+</nav>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)};
+var KEY='trips-v1',UK='unit-v1';
+var trips=[],mi=false,cur=null,watch=null,timer=null,wake=null;
+function load(){try{trips=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){trips=[]}try{mi=localStorage.getItem(UK)==='mi'}catch(e){}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(trips))}catch(e){$('msg').textContent='Could not save to this browser.'}}
+function saveU(){try{localStorage.setItem(UK,mi?'mi':'km')}catch(e){}}
+load();
+
+function sp(ms){return Math.round(ms*(mi?2.23694:3.6))}
+function dist(m){return ((m/1000)*(mi?0.621371:1)).toFixed(1)}
+function dur(s){s=Math.round(s/1000);var h=Math.floor(s/3600),m=Math.floor(s%3600/60),c=s%60;
+ return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(c).padStart(2,'0')}
+function hav(a,b){var R=6371000,r=Math.PI/180,dl=(b[0]-a[0])*r,dn=(b[1]-a[1])*r;
+ var x=Math.sin(dl/2)*Math.sin(dl/2)+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dn/2)*Math.sin(dn/2);
+ return 2*R*Math.asin(Math.sqrt(x))}
+function units(){var u=mi?'mph':'km/h';$('u1').textContent=u;$('unit').textContent=u;limUI()}
+
+function draw(svg,pts,live,ev){
+  var NS='http://www.w3.org/2000/svg',W=400,H=260,P=24;
+  svg.innerHTML='';
+  if(!pts.length){var t=document.createElementNS(NS,'text');t.setAttribute('x',200);t.setAttribute('y',135);t.setAttribute('text-anchor','middle');t.setAttribute('fill','currentColor');t.setAttribute('opacity','.5');t.textContent='Route will appear here';svg.appendChild(t);return}
+  var la=pts.map(function(p){return p[0]}),lo=pts.map(function(p){return p[1]});
+  var mnA=Math.min.apply(0,la),mxA=Math.max.apply(0,la),mnO=Math.min.apply(0,lo),mxO=Math.max.apply(0,lo);
+  var k=Math.cos((mnA+mxA)/2*Math.PI/180);
+  var w=Math.max((mxO-mnO)*k,1e-4),h=Math.max(mxA-mnA,1e-4);
+  var s=Math.min((W-2*P)/w,(H-2*P)/h);
+  var ox=(W-w*s)/2,oy=(H-h*s)/2;
+  function xy(p){return [ox+(p[1]-mnO)*k*s,H-oy-(p[0]-mnA)*s]}
+  var d=pts.map(function(p,i){var q=xy(p);return (i?'L':'M')+q[0].toFixed(1)+' '+q[1].toFixed(1)}).join('');
+  var path=document.createElementNS(NS,'path');
+  path.setAttribute('d',d);path.setAttribute('fill','none');path.setAttribute('stroke','var(--route)');path.setAttribute('stroke-width','4');path.setAttribute('stroke-linecap','round');path.setAttribute('stroke-linejoin','round');
+  svg.appendChild(path);
+  function dot(p,c){var q=xy(p),e=document.createElementNS(NS,'circle');e.setAttribute('cx',q[0]);e.setAttribute('cy',q[1]);e.setAttribute('r',7);e.setAttribute('fill',c);e.setAttribute('stroke','#fff');e.setAttribute('stroke-width','2');svg.appendChild(e)}
+  dot(pts[0],'#16a34a');
+  dot(pts[pts.length-1],live?'#2563eb':'#dc2626');
+  (ev||[]).forEach(function(e){var q=xy([e.la,e.lo]),c=document.createElementNS(NS,'circle');c.setAttribute('cx',q[0]);c.setAttribute('cy',q[1]);c.setAttribute('r',6);c.setAttribute('fill',EV[e.k].c);c.setAttribute('stroke','#fff');c.setAttribute('stroke-width','2');svg.appendChild(c)});
+}
+
+var HAS_L=typeof L!=='undefined',lm=null,lm2=null,lLine=null,lTrip=null,lEnds=null,me=null,meAcc=null,centered=false;
+function mkMap(id){
+  var m=L.map(id).setView([20,0],2);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(m);
+  return m;
+}
+function initMaps(){
+  if(HAS_L){
+    $('lmap').classList.remove('hide');$('map').classList.add('hide');$('lmap2').classList.remove('hide');$('map2').classList.add('hide');
+    try{
+      lm=mkMap('lmap');lEvL=L.layerGroup().addTo(lm);
+      setTimeout(function(){if(lm)lm.invalidateSize()},300);
+      window.addEventListener('resize',function(){if(lm)lm.invalidateSize()});
+      return;
+    }catch(e){
+      HAS_L=false;lm=null;
+      $('lmap').classList.add('hide');$('map').classList.remove('hide');$('lmap2').classList.add('hide');$('map2').classList.remove('hide');
+    }
+  }
+  draw($('map'),[],false);
+}
+function showMe(c){
+  if(!HAS_L||!lm)return;
+  var ll=[c.latitude,c.longitude];
+  if(!me){
+    meAcc=L.circle(ll,{radius:c.accuracy,color:'#2563eb',weight:1,fillOpacity:.12}).addTo(lm);
+    me=L.circleMarker(ll,{radius:8,color:'#fff',weight:3,fillColor:'#2563eb',fillOpacity:1}).addTo(lm);
+  }else{me.setLatLng(ll);meAcc.setLatLng(ll);meAcc.setRadius(c.accuracy)}
+  if(!cur&&!centered){lm.setView(ll,16);centered=true}
+}
+function drawLive(){
+  if(HAS_L&&lm){
+    var ll=cur.pts.map(function(p){return [p[0],p[1]]});
+    if(!lLine)lLine=L.polyline(ll,{color:'#2563eb',weight:5}).addTo(lm);else lLine.setLatLngs(ll);
+    if(ll.length)lm.panTo(ll[ll.length-1]);
+  }else draw($('map'),cur.pts,true,cur.ev);
+}
+function drawTrip(t){
+  if(HAS_L){
+    if(!lm2)lm2=mkMap('lmap2');
+    if(lTrip){lTrip.remove();lTrip=null}
+    if(lEnds){lEnds.remove();lEnds=null}
+    var ll=t.pts.map(function(p){return [p[0],p[1]]});
+    lTrip=L.polyline(ll,{color:'#2563eb',weight:5}).addTo(lm2);
+    function dot(pt,c){return L.circleMarker(pt,{radius:8,color:'#fff',weight:3,fillColor:c,fillOpacity:1})}
+    lEnds=L.layerGroup([dot(ll[0],'#16a34a'),dot(ll[ll.length-1],'#dc2626')]).addTo(lm2);
+    lm2.invalidateSize();lm2.fitBounds(lTrip.getBounds(),{padding:[24,24],maxZoom:17});
+  }else draw($('map2'),t.pts,false,t.ev);
+}
+var EV={speeding:{n:'Speeding',c:'#dc2626'},brake:{n:'Hard braking',c:'#f59e0b'},accel:{n:'Hard acceleration',c:'#8b5cf6'},turn:{n:'Sharp turn',c:'#0891b2'}};
+var LIM=100,lEvL=null,lEvT=null;
+try{var q0=localStorage.getItem('lim-v1');if(q0!==null&&!isNaN(+q0))LIM=+q0}catch(e){}
+function limUI(){var e=$('lim');if(!e)return;e.value=Math.round(mi?LIM*0.621371:LIM);$('lim-u').textContent=mi?'mph':'km/h'}
+$('lim').onchange=function(){var v=+this.value;if(isNaN(v)||v<0)v=0;LIM=mi?v/0.621371:v;try{localStorage.setItem('lim-v1',String(LIM))}catch(e){}limUI()};
+function evText(e){
+  var s=sp(e.s)+(mi?' mph':' km/h');
+  if(e.k==='speeding')return 'Reached '+s;
+  if(e.k==='turn')return 'At '+s+', '+e.v.toFixed(1)+' m/s\u00b2 sideways';
+  return 'At '+s+', '+Math.abs(e.v).toFixed(1)+' m/s\u00b2';
+}
+function evMarker(e){
+  return L.circleMarker([e.la,e.lo],{radius:9,color:'#fff',weight:2,fillColor:EV[e.k].c,fillOpacity:1}).bindPopup('<b>'+EV[e.k].n+'</b><br>'+evText(e));
+}
+function evLive(){
+  var c={};cur.ev.forEach(function(e){c[e.k]=(c[e.k]||0)+1});
+  var t=Object.keys(c).map(function(k){return EV[k].n+' '+c[k]}).join(' \u00b7 ');
+  $('evlive').textContent=t?'Events: '+t:'';
+}
+function addEv(k,pt,val,sp){
+  var now=pt[2];
+  if(now-(cur.evT[k]||0)<5000)return;
+  cur.evT[k]=now;
+  var e={k:k,t:now,la:pt[0],lo:pt[1],v:+val.toFixed(2),s:+sp.toFixed(1)};
+  cur.ev.push(e);
+  if(HAS_L&&lEvL)lEvL.addLayer(evMarker(e));
+  evLive();
+}
+function detect(c,v,pt){
+  var now=pt[2],pr=cur.prev;
+  var h=(c.heading!=null&&!isNaN(c.heading))?c.heading:null;
+  if(LIM>0){
+    if(v>LIM/3.6){if(!cur.ov)cur.ov=now;else if(!cur.ovL&&now-cur.ov>=3000){cur.ovL=true;addEv('speeding',pt,v,v)}}
+    else{cur.ov=0;cur.ovL=false}
+  }
+  if(pr){
+    var dt=(now-pr.t)/1000;
+    if(dt>=0.5&&dt<=4){
+      var a=(v-pr.v)/dt,m=cur.m;
+      if(a>m.ma&&a<12)m.ma=a;if(a<m.md&&a>-12)m.md=a;
+      if(a<=-3.5)addEv('brake',pt,a,v);
+      else if(a>=3)addEv('accel',pt,a,v);
+      if(h!=null&&pr.h!=null&&v>=6){
+        var dh=Math.abs(((h-pr.h+540)%360)-180),lat=v*(dh*Math.PI/180)/dt;
+        if(lat<12&&lat>m.ml)m.ml=lat;
+        if(lat>=4)addEv('turn',pt,lat,v);
+      }
+    }
+  }
+  cur.prev={t:now,v:v,h:h};
+}
+function renderDetailEv(t){
+  var ev=t.ev||[],chips=$('dt-chips'),list=$('dt-ev');
+  chips.innerHTML='';list.innerHTML='';
+  if(lEvT){lEvT.remove();lEvT=null}
+  if(!ev.length){list.innerHTML='<div class="mute" style="margin-top:12px">No safety events detected on this trip.</div>';return}
+  var on={},cnt={};
+  ev.forEach(function(e){cnt[e.k]=(cnt[e.k]||0)+1;on[e.k]=true});
+  if(HAS_L&&lm2)lEvT=L.layerGroup().addTo(lm2);
+  function refresh(){
+    if(lEvT)lEvT.clearLayers();
+    list.innerHTML='';
+    ev.forEach(function(e){
+      if(!on[e.k])return;
+      if(lEvT)lEvT.addLayer(evMarker(e));
+      var r=document.createElement('div');r.className='evrow';r.style.cursor='pointer';
+      r.innerHTML='<span class="evdot" style="background:'+EV[e.k].c+'"></span><div style="flex:1"><b>'+EV[e.k].n+'</b><div class="mute">'+evText(e)+'</div></div><span class="mute">'+dur(e.t-t.start)+'</span>';
+      r.onclick=function(){
+        if(HAS_L&&lm2){lm2.setView([e.la,e.lo],17);L.popup().setLatLng([e.la,e.lo]).setContent('<b>'+EV[e.k].n+'</b><br>'+evText(e)).openOn(lm2);$('lmap2').scrollIntoView({behavior:'smooth',block:'center'})}
+      };
+      list.appendChild(r);
+    });
+  }
+  Object.keys(EV).forEach(function(k){
+    if(!cnt[k])return;
+    var b=document.createElement('button');b.className='sm';
+    function paint(){b.style.background=on[k]?EV[k].c:'';b.style.color=on[k]?'#fff':'';b.style.borderColor=EV[k].c}
+    b.textContent=EV[k].n+' ('+cnt[k]+')';paint();
+    b.onclick=function(){on[k]=!on[k];paint();refresh()};
+    chips.appendChild(b);
+  });
+  refresh();
+}
+var WT={speeding:5,brake:4,accel:2,turn:3};
+function score(t){
+  if(!Array.isArray(t.ev))return null;
+  var w=0;t.ev.forEach(function(e){w+=WT[e.k]||2});
+  if(t.m&&t.m.over)w+=t.m.over/60000;
+  var km=Math.max(t.dist/1000,3);
+  return Math.max(0,Math.min(100,Math.round(100-(w/km)*10)));
+}
+function scCol(x){return x>=90?'#16a34a':x>=75?'#65a30d':x>=60?'#d97706':'#dc2626'}
+function scLab(x){return x>=90?'Excellent':x>=75?'Good':x>=60?'Fair':'Needs work'}
+function scoreCard(t){
+  var x=score(t);
+  if(x==null)return '<div class="mute" style="margin-top:10px">No safety data: this trip was recorded before events were added.</div>';
+  return '<div class="stat" style="margin:10px 0;border-left:6px solid '+scCol(x)+'"><span>Driving score</span><b style="font-size:44px;color:'+scCol(x)+'">'+x+'<span style="font-size:18px;color:var(--mute)"> /100</span></b><span>'+scLab(x)+'</span></div>';
+}
+function bandIdx(v){var k=v*3.6;if(v<1)return 0;if(k<30)return 1;if(k<60)return 2;if(k<90)return 3;if(k<120)return 4;return 5}
+function meta(c,pt){
+  var m=cur.m,now=pt[2],v=c.speed;
+  if(v==null||isNaN(v)){var l=cur.pts[cur.pts.length-1];v=l?hav(l,pt)/Math.max((now-l[2])/1000,1):0}
+  if(m.t0){
+    var dt=now-m.t0;
+    if(dt>0&&dt<10000){
+      var bi=bandIdx(v);m.b[bi]+=dt;
+      if(LIM>0&&v>LIM/3.6)m.over+=dt;
+      var hr=new Date(now).getHours();
+      if(bi>0&&(hr>=22||hr<5))m.night+=dt;
+    }
+  }
+  m.t0=now;m.as+=c.accuracy;m.an++;
+  if(v<1){
+    if(!m.sa)m.sa=now;
+    if(!m.sc&&now-m.sa>=10000){m.sc=1;m.stops++}
+  }else{
+    if(m.sa&&m.sc&&now-m.sa>m.ls)m.ls=now-m.sa;
+    m.sa=0;m.sc=0;
+  }
+  var al=c.altitude;
+  if(al!=null&&!isNaN(al)&&(c.altitudeAccuracy==null||c.altitudeAccuracy<=20)){
+    m.na++;
+    if(m.amin==null||al<m.amin)m.amin=al;
+    if(m.amax==null||al>m.amax)m.amax=al;
+    if(m.ra==null)m.ra=al;
+    else{var df=al-m.ra;if(df>=4){m.gain+=df;m.ra=al}else if(df<=-4){m.loss-=df;m.ra=al}}
+  }
+}
+function bandsHtml(t){
+  var m=t.m;if(!m||!m.b)return '';
+  var tot=m.b.reduce(function(a,b){return a+b},0);if(tot<=0)return '';
+  var f=mi?0.621371:1,e=[0,30,60,90,120].map(function(x){return Math.round(x*f)});
+  var lab=['Stopped',e[0]+'\u2013'+e[1],e[1]+'\u2013'+e[2],e[2]+'\u2013'+e[3],e[3]+'\u2013'+e[4],e[4]+'+'];
+  var h='<div style="margin-top:14px"><span class="mute">Time by speed ('+(mi?'mph':'km/h')+')</span>';
+  m.b.forEach(function(ms,i){
+    var pc=Math.round(ms/tot*100);
+    h+='<div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:13px"><span class="mute" style="width:64px">'+lab[i]+'</span><div style="flex:1;height:10px;background:var(--bg);border-radius:6px;overflow:hidden"><div style="width:'+pc+'%;height:100%;background:'+(i===0?'var(--mute)':'var(--acc)')+'"></div></div><span style="width:92px;text-align:right">'+pc+'% \u00b7 '+dur(ms)+'</span></div>';
+  });
+  return h+'</div>';
+}
+var rng='all';
+function inRange(t){
+  var n=Date.now(),d0=new Date();d0.setHours(0,0,0,0);
+  if(rng==='today')return t.start>=d0.getTime();
+  if(rng==='7')return t.start>=n-7*864e5;
+  if(rng==='30')return t.start>=n-30*864e5;
+  return true;
+}
+function renderFilters(){
+  var F=$('flt');F.innerHTML='';
+  [['today','Today'],['7','7 days'],['30','30 days'],['all','All']].forEach(function(r){
+    var b=document.createElement('button');b.className='sm';b.textContent=r[1];
+    if(rng===r[0]){b.style.background='var(--acc)';b.style.color='#fff';b.style.borderColor='var(--acc)'}
+    b.onclick=function(){rng=r[0];renderList()};
+    F.appendChild(b);
+  });
+}
+function renderSummary(vis){
+  var S=$('sum');
+  if(!vis.length){S.classList.add('hide');return}
+  S.classList.remove('hide');
+  var km=0,ms=0,mx=0,ev=0,ws=0,wd=0,nc=0;
+  vis.forEach(function(t){
+    km+=t.dist;ms+=t.end-t.start;if(t.max>mx)mx=t.max;
+    if(Array.isArray(t.ev)){ev+=t.ev.length;var w=Math.max(t.dist/1000,1);ws+=score(t)*w;wd+=w;nc++}
+  });
+  var avg=wd?Math.round(ws/wd):null,u=mi?' mph':' km/h';
+  var h=avg==null?'':'<div class="stat" style="grid-column:1/-1;border-left:6px solid '+scCol(avg)+'"><span>Overall driving score</span><b style="font-size:40px;color:'+scCol(avg)+'">'+avg+'<span style="font-size:16px;color:var(--mute)"> /100</span></b><span>'+scLab(avg)+' \u00b7 based on '+nc+' trip'+(nc===1?'':'s')+'</span></div>';
+  [['Trips',String(vis.length)],['Distance',dist(km)+(mi?' mi':' km')],['Drive time',dur(ms)],['Top speed',sp(mx)+u],['Safety events',String(ev)]].forEach(function(a){
+    h+='<div class="stat"><span>'+a[0]+'</span><b>'+a[1]+'</b></div>';
+  });
+  S.innerHTML=h;
+}
+var CK='cur-v1',lastCk=0;
+function ckpt(force){
+  if(!cur)return;
+  var n=Date.now();if(!force&&n-lastCk<8000)return;lastCk=n;
+  try{localStorage.setItem(CK,JSON.stringify(cur))}catch(e){}
+}
+function clearCk(){try{localStorage.removeItem(CK)}catch(e){}}
+function recover(){
+  var raw=null;try{raw=localStorage.getItem(CK)}catch(e){}
+  if(!raw)return;
+  clearCk();
+  try{
+    var c=JSON.parse(raw);
+    if(!c||!c.pts||c.pts.length<2||(c.auto&&c.dist<300))return;
+    if(trips.some(function(x){return x.id===c.id}))return;
+    var last=c.pts[c.pts.length-1];
+    trips.unshift({id:c.id,start:c.start,end:last[2],dist:c.dist,max:c.max,pts:c.pts,ev:c.ev||[],m:c.m,gaps:c.gaps||0,gapMs:c.gapMs||0,rec:1});
+    trips.sort(function(a,b){return b.start-a.start});
+    save();bumpBk();
+    toast('Recovered a trip that was interrupted: '+dist(c.dist)+(mi?' mi':' km'));
+  }catch(e){}
+}
+function upd(){
+  if(!cur){return}
+  ckpt();
+  if(cur.auto&&Date.now()-cur.lastMove>180000&&Date.now()-(cur.resumeAt||0)>20000){endTrip(cur.lastMove);return}
+  var el=Date.now()-cur.start;
+  $('tm').textContent=dur(el);
+  $('ds').textContent=dist(cur.dist)+(mi?' mi':' km');
+  $('av').textContent=el>5000?sp(cur.dist/(el/1000)):0;
+  $('mx').textContent=sp(cur.max);
+}
+var auto=false,buf=[],fast=0;
+function onPos(p){
+  var c=p.coords;
+  $('gps').textContent='GPS: ±'+Math.round(c.accuracy)+' m · '+(c.speed==null?'speed n/a':sp(c.speed)+(mi?' mph':' km/h'))+(c.accuracy>60?' · signal too weak, skipping':'')+(cur||!auto?'':' · trip starts above '+(mi?'9 mph':'14 km/h'));
+  showMe(c);
+  if(c.accuracy>60)return;
+  var pt=[+c.latitude.toFixed(6),+c.longitude.toFixed(6),Date.now()];
+  if(!cur){
+    if(!auto)return;
+    var b=buf[buf.length-1],bv=c.speed;
+    if(bv==null||isNaN(bv))bv=b?hav(b,pt)/Math.max((pt[2]-b[2])/1000,1):0;
+    buf.push(pt);if(buf.length>4)buf.shift();
+    fast=bv>=4?fast+1:0;
+    if(fast>=2){var init=buf.slice();buf=[];fast=0;startTrip(init)}
+    return;
+  }
+  if(cur.m.t0&&pt[2]-cur.m.t0>60000){cur.gaps=(cur.gaps||0)+1;cur.gapMs=(cur.gapMs||0)+(pt[2]-cur.m.t0);cur.prev=null}
+  meta(c,pt);
+  var last=cur.pts[cur.pts.length-1],v=c.speed;
+  if(last){
+    var d=hav(last,pt);
+    if(d<4&&(v==null||v<1))return;
+    cur.dist+=d;
+    if(v==null||isNaN(v))v=d/Math.max((pt[2]-last[2])/1000,1);
+  }
+  v=v||0;if(v>=1.5)cur.lastMove=Date.now();cur.spd=v;if(v>cur.max)cur.max=v;
+  cur.pts.push(pt);
+  ckpt();
+  detect(c,v,pt);
+  $('spd').textContent=sp(v);
+  drawLive();upd();
+}
+function showBlocked(){
+  var ua=navigator.userAgent,ios=/iPhone|iPad|iPod/.test(ua),and=/Android/.test(ua);
+  $('perm-steps').textContent=ios?'Web pages can\'t open Settings for you, so please do this: tap the "aA" icon in Safari\'s address bar, choose Website Settings, set Location to Allow. If that is greyed out, go to Settings > Privacy & Security > Location Services and turn it on, then set Safari Websites to While Using the App.':and?'Web pages can\'t open Settings for you, so please do this: tap the lock or tune icon next to the address bar, open Permissions, and set Location to Allow. If it is still blocked, check Settings > Location is on.':'Web pages can\'t open Settings for you. Open this site\'s permissions from the lock icon in the address bar and set Location to Allow.';
+  $('perm-steps').textContent+=' If location is already allowed, the page may be open inside another app or a preview. Open this link directly in Safari or Chrome instead.';
+  $('perm').classList.remove('hide');
+  if(!cur)stopWatch();
+  if(auto){auto=false;autoUI()}
+  $('msg').textContent='';
+}
+$('perm-close').onclick=function(){$('perm').classList.add('hide')};
+$('perm-retry').onclick=function(){
+  $('perm').classList.add('hide');auto=true;autoUI();
+  try{localStorage.setItem('auto-v1','1')}catch(e){}
+  ensureWatch();$('msg').textContent='Checking location access…';
+};
+function onErr(e){
+  var em='GPS error '+e.code+(e.message?': '+e.message:'');
+  if(e.code===1&&!cur){showBlocked();$('gps').textContent=em;return}
+  $('gps').textContent=em;
+  $('msg').textContent=e.code===1?'Location was blocked. Allow it in your browser settings.':'Waiting for GPS signal…';
+}
+
+function wlMsg(t){$('wl').textContent=t}
+async function lock(){
+  if(wake)return;
+  var tip=' Set Auto-Lock to Never in Settings > Display & Brightness while driving.';
+  if(!navigator.wakeLock){wlMsg('This browser cannot keep the screen on.'+tip);return}
+  try{
+    wake=await navigator.wakeLock.request('screen');
+    wake.addEventListener('release',function(){wake=null});
+    wlMsg('Screen stays on while this page is open.');
+  }catch(e){wake=null;wlMsg('Could not keep the screen awake.'+tip)}
+}
+function unlock(){try{if(wake)wake.release()}catch(e){}wake=null}
+
+function ensureWatch(){if(watch===null&&navigator.geolocation){$('gps').textContent='GPS: waiting for first signal…';watch=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:20000})}}
+function initGeo(){
+  if(!navigator.geolocation)return;
+  if(!(navigator.permissions&&navigator.permissions.query)){ensureWatch();return}
+  navigator.permissions.query({name:'geolocation'}).then(function(r){
+    function go(){
+      if(r.state==='denied'){showBlocked()}
+      else{$('perm').classList.add('hide');ensureWatch()}
+    }
+    go();
+    r.onchange=function(){
+      if(r.state==='granted'){
+        try{auto=localStorage.getItem('auto-v1')!=='0'}catch(e){auto=true}
+        autoUI();$('perm').classList.add('hide');ensureWatch();
+      }else if(r.state==='denied'){stopWatch();showBlocked()}
+    };
+  },function(){ensureWatch()});
+}
+function stopWatch(){if(watch!==null){navigator.geolocation.clearWatch(watch);watch=null}$('gps').textContent=''}
+function startTrip(init){
+  if(lLine){lLine.remove();lLine=null}
+  if(lEvL)lEvL.clearLayers();
+  $('evlive').textContent='';
+  var t=init?init[0][2]:Date.now();
+  cur={id:t,start:t,dist:0,max:0,spd:0,pts:init||[],lastMove:Date.now(),auto:!!init,ev:[],evT:{},m:{t0:0,b:[0,0,0,0,0,0],stops:0,ls:0,sa:0,sc:0,gain:0,loss:0,ra:null,amin:null,amax:null,na:0,over:0,night:0,ma:0,md:0,ml:0,as:0,an:0}};
+  if(init)for(var i=1;i<init.length;i++)cur.dist+=hav(init[i-1],init[i]);
+  $('msg').textContent=init?'Trip detected and started.':'Keep this screen open while driving.';
+  $('go').textContent='End trip';$('go').className='btn stop';
+  ensureWatch();timer=setInterval(upd,1000);lock();
+}
+function toast(t){var e=$('toast');e.textContent=t;e.classList.remove('hide');clearTimeout(toast.t);toast.t=setTimeout(function(){e.classList.add('hide')},4500)}
+function endTrip(endAt){
+  clearInterval(timer);if(!auto)unlock();
+  var end=endAt||Date.now();
+  var m=cur.m;
+  if(endAt){m.b[0]=Math.max(0,m.b[0]-(Date.now()-endAt));if(m.sc)m.stops=Math.max(0,m.stops-1);m.sa=0;m.sc=0}
+  else if(m.sa&&m.sc&&end-m.sa>m.ls)m.ls=end-m.sa;
+  if(cur.pts.length>1&&(!cur.auto||cur.dist>300)){trips.unshift({id:cur.id,start:cur.start,end:end,dist:cur.dist,max:cur.max,pts:cur.pts,ev:cur.ev,m:m,gaps:cur.gaps||0,gapMs:cur.gapMs||0});save();bumpBk();$('msg').textContent='Trip saved.';toast('Trip saved: '+dist(cur.dist)+(mi?' mi':' km')+' in '+dur(end-cur.start))}
+  else{$('msg').textContent='No movement recorded, so the trip was not saved.';toast('Trip not saved: no movement recorded')}
+  cur=null;buf=[];fast=0;clearCk();
+  $('go').textContent='Start trip';$('go').className='btn';$('spd').textContent='0';
+  if(auto)$('msg').textContent+=' Auto-detect is watching for your next trip.';
+}
+$('go').onclick=function(){
+  if(!cur){
+    if(!navigator.geolocation){$('msg').textContent='GPS not supported here.';return}
+    startTrip();
+  }else endTrip();
+};
+function autoUI(){$('auto').textContent=auto?'On':'Off';$('auto').style.background=auto?'var(--acc)':'';$('auto').style.color=auto?'#fff':''}
+$('auto').onclick=function(){
+  auto=!auto;autoUI();
+  if(auto){try{navigator.permissions.query({name:'geolocation'}).then(function(r){if(r.state==='denied')showBlocked()})}catch(e){}}
+  try{localStorage.setItem('auto-v1',auto?'1':'0')}catch(e){}
+  if(auto&&!cur){ensureWatch();lock();$('msg').textContent='Auto-detect on: a trip starts when you drive faster than about 14 km/h, and ends after 3 minutes stopped. Keep this page open.'}
+  else if(!auto&&!cur){$('msg').textContent='';unlock();wlMsg('')}
+};
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='hidden'){ckpt(true);return}
+  if(cur)cur.resumeAt=Date.now();
+  if(cur||auto)lock();
+});
+window.addEventListener('pagehide',function(){ckpt(true)});
+['touchend','click'].forEach(function(ev){document.addEventListener(ev,function(){if((cur||auto)&&!wake)lock()},{passive:true})});
+
+function stats(t){
+  var el=t.end-t.start,u=mi?' mph':' km/h',m=t.m;
+  var clk=function(x){return new Date(x).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})};
+  var a=[['Time',dur(el)],['Distance',dist(t.dist)+(mi?' mi':' km')],['Avg speed',sp(t.dist/(el/1000))+u],['Max speed',sp(t.max)+u],['Started',clk(t.start)],['Ended',clk(t.end)]];
+  if(t.rec)a.push(['Recovered','after interruption']);
+  if(t.gaps)a.push(['GPS gaps',t.gaps+' ('+dur(t.gapMs)+')']);
+  if(m&&m.b){
+    var mov=m.b.slice(1).reduce(function(x,y){return x+y},0);
+    a.push(['Moving time',dur(mov)],['Stopped time',dur(m.b[0])]);
+    if(mov>0)a.push(['Avg moving speed',sp(t.dist/(mov/1000))+u]);
+    a.push(['Stops',String(m.stops)]);
+    if(m.ls)a.push(['Longest stop',dur(m.ls)]);
+    if(m.over>0)a.push(['Time over limit',dur(m.over)]);
+    if(m.night>0)a.push(['Night driving',dur(m.night)]);
+    if(m.md<0)a.push(['Peak braking',Math.abs(m.md).toFixed(1)+' m/s\u00b2']);
+    if(m.ma>0)a.push(['Peak acceleration',m.ma.toFixed(1)+' m/s\u00b2']);
+    if(m.ml>0)a.push(['Peak cornering',m.ml.toFixed(1)+' m/s\u00b2']);
+    if(m.na>1)a.push(['Climb',Math.round(m.gain)+' m'],['Descent',Math.round(m.loss)+' m'],['Highest point',Math.round(m.amax)+' m']);
+    if(m.an)a.push(['Avg GPS accuracy','\u00b1'+Math.round(m.as/m.an)+' m']);
+  }
+  if(Array.isArray(t.ev)){
+    a.push(['Safety events',String(t.ev.length)]);
+    if(t.dist>=1000)a.push(['Events / 100 km',(t.ev.length/(t.dist/1000)*100).toFixed(1)]);
+  }
+  if(t.pts&&t.pts.length>1)a.push(['Net distance',dist(hav(t.pts[0],t.pts[t.pts.length-1]))+(mi?' mi':' km')]);
+  return a.map(function(x){return '<div class="stat"><span>'+x[0]+'</span><b>'+x[1]+'</b></div>'}).join('');
+}
+function renderList(){
+  var L=$('list');
+  renderFilters();
+  var vis=trips.filter(inRange);renderSummary(vis);
+  if(!trips.length){L.innerHTML='<span class="mute">No trips yet. Start one from the Track tab.</span>';return}
+  if(!vis.length){L.innerHTML='<span class="mute">No trips in this period.</span>';return}
+  L.innerHTML='';
+  vis.forEach(function(t){
+    var d=document.createElement('div');d.className='trip';
+    var el=t.end-t.start,sc=score(t);
+    d.innerHTML='<div class="row"><div><b>'+new Date(t.start).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'</b><div class="mute">'+dist(t.dist)+(mi?' mi':' km')+' · '+dur(el)+' · max '+sp(t.max)+((t.ev&&t.ev.length)?' · '+t.ev.length+' event'+(t.ev.length===1?'':'s'):'')+(sc!=null?' \u00b7 <b style="color:'+scCol(sc)+'">'+sc+'/100</b>':'')+'</div></div><div><button class="sm v">View</button> <button class="sm x">Delete</button></div></div>';
+    d.querySelector('.v').onclick=function(){
+      $('detail').classList.remove('hide');
+      $('dt-title').textContent=new Date(t.start).toLocaleDateString([], {weekday:'long',month:'short',day:'numeric'});
+      drawTrip(t);renderDetailEv(t);$('dt-score').innerHTML=scoreCard(t);$('dt-stats').innerHTML=stats(t);$('dt-bands').innerHTML=bandsHtml(t);window.scrollTo(0,0);
+    };
+    d.querySelector('.x').onclick=function(){
+      if(confirm('Delete this trip?')){trips=trips.filter(function(x){return x.id!==t.id});save();$('detail').classList.add('hide');renderList()}
+    };
+    L.appendChild(d);
+  });
+}
+$('dt-close').onclick=function(){$('detail').classList.add('hide')};
+
+document.querySelectorAll('nav button').forEach(function(b){
+  b.onclick=function(){
+    document.querySelectorAll('nav button').forEach(function(x){x.classList.toggle('on',x===b)});
+    ['track','trips','acct'].forEach(function(v){$('v-'+v).classList.toggle('hide',v!==b.dataset.v)});
+    if(b.dataset.v==='trips')renderList();
+    if(b.dataset.v==='acct')bkInfo();
+    if(b.dataset.v==='track'&&lm)lm.invalidateSize();
+  };
+});
+$('unit').onclick=function(){mi=!mi;saveU();units();renderList();upd()};
+function bkInfo(){var l='never';try{var t=localStorage.getItem('bk-v1');if(t)l=new Date(+t).toLocaleDateString()}catch(e){}
+  $('bk-info').textContent=trips.length+' trip'+(trips.length===1?'':'s')+' saved · last backup: '+l}
+$('exp').onclick=async function(){
+  var m=$('bk-msg');
+  if(!trips.length){m.textContent='No trips to back up yet.';return}
+  var body=JSON.stringify({app:'trip-tracker',version:1,exported:new Date().toISOString(),trips:trips});
+  var name='trip-tracker-backup-'+new Date().toISOString().slice(0,10)+'.json';
+  try{
+    var f=new File([body],name,{type:'application/json'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'Trip Tracker backup'})}
+    else{var u=URL.createObjectURL(new Blob([body],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},4000)}
+    try{localStorage.setItem('bk-v1',String(Date.now()));localStorage.setItem('bkc-v1','0')}catch(e){}checkBk();
+    m.textContent='Backup file created. Choose Save to Files, then iCloud Drive.';bkInfo();
+  }catch(e){if(!e||e.name!=='AbortError')m.textContent='Could not export: '+(e&&e.message||'unknown error')}
+};
+function bkCount(){try{return +localStorage.getItem('bkc-v1')||0}catch(e){return 0}}
+function bumpBk(){try{localStorage.setItem('bkc-v1',String(bkCount()+1))}catch(e){}checkBk()}
+function checkBk(){var n=bkCount(),el=$('bk-remind');
+  if(n>=10){$('bk-remind-t').textContent=n+' trips saved since your last backup.';el.classList.remove('hide')}else el.classList.add('hide')}
+$('bk-later').onclick=function(){$('bk-remind').classList.add('hide')};
+$('bk-now').onclick=function(){document.querySelector('nav button[data-v="acct"]').click();$('exp').click()};
+$('imp').onclick=function(){$('impf').click()};
+$('impf').onchange=function(){
+  var f=this.files&&this.files[0],m=$('bk-msg');if(!f)return;
+  var r=new FileReader();
+  r.onload=function(){
+    try{
+      var j=JSON.parse(r.result),a=Array.isArray(j)?j:j.trips;if(!Array.isArray(a))throw 0;
+      var ids={};trips.forEach(function(x){ids[x.id]=1});
+      var n=0;a.forEach(function(x){if(x&&Array.isArray(x.pts)&&x.pts.length&&x.start&&x.end&&!ids[x.id]){trips.push(x);ids[x.id]=1;n++}});
+      trips.sort(function(a,b){return b.start-a.start});save();
+      m.textContent='Restored '+n+' new trip'+(n===1?'':'s')+(a.length-n?' ('+(a.length-n)+' skipped: already here or invalid)':'')+'.';
+      bkInfo();renderList();
+    }catch(e){m.textContent='That file is not a valid Trip Tracker backup.'}
+  };
+  r.onerror=function(){m.textContent='Could not read that file.'};
+  r.readAsText(f);this.value='';
+};
+bkInfo();checkBk();
+units();initMaps();
+recover();
+try{auto=localStorage.getItem('auto-v1')!=='0'}catch(e){auto=true}
+autoUI();initGeo();if(auto){lock();$('msg').textContent='Auto-detect is watching for a trip. Keep this page open.'}
+})();
+</script>
+</body>
+</html>
