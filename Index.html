@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trip Tracker</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--text:#14171a;--mute:#6b7280;--acc:#2563eb;--go:#16a34a;--stop:#dc2626;--line:#e5e7eb;--route:#2563eb;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1115;--card:#1a1d24;--text:#f1f3f5;--mute:#9aa3af;--acc:#60a5fa;--line:#2a2f3a;--route:#60a5fa}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+body{max-width:520px;margin:0 auto;padding:16px 16px 90px}
+h1{font-size:22px;margin:4px 0 14px}
+.card{background:var(--card);border-radius:16px;padding:14px;margin-bottom:12px;border:1px solid var(--line)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
+.stat b{display:block;font-size:26px;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
+.big b{font-size:48px}
+.btn{width:100%;border:0;border-radius:14px;padding:16px;font-size:18px;font-weight:600;color:#fff;background:var(--go);margin:4px 0 12px}
+.btn.stop{background:var(--stop)}
+.map{width:100%;height:260px;border-radius:12px;background:var(--bg);display:block}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{flex:1;padding:14px;border:0;background:none;color:var(--mute);font-size:15px;font-weight:600}
+nav button.on{color:var(--acc)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.trip{padding:12px 0;border-bottom:1px solid var(--line)}
+.trip:last-child{border:0}
+.mute{color:var(--mute);font-size:13px}
+.sm{border:1px solid var(--line);background:none;color:var(--text);border-radius:10px;padding:6px 10px;font-size:13px}
+.hide{display:none}
+.msg{font-size:13px;color:var(--mute);margin:6px 0}
+</style>
+</head>
+<body>
+<h1>🚗 Trip Tracker</h1>
+
+<section id="v-track">
+  <button class="btn" id="go">Start trip</button>
+  <div class="row card" style="padding:10px 14px"><span>Auto-detect trips</span><button class="sm" id="auto">Off</button></div>
+  <div class="msg" id="msg"></div>
+  <div class="msg" id="gps"></div>
+  <div class="card hide" id="perm"><b>Location access is off</b><p class="mute" id="perm-steps"></p><div class="row" style="gap:8px"><button class="sm" id="perm-retry">I've turned it on, try again</button><button class="sm" id="perm-close">Close</button></div></div>
+  <div class="stat big" style="margin-bottom:10px"><span>Speed</span><b id="spd">0</b><span id="u1">km/h</span></div>
+  <div class="grid" style="margin-bottom:12px">
+    <div class="stat"><span>Time</span><b id="tm">0:00</b></div>
+    <div class="stat"><span>Distance</span><b id="ds">0.0</b></div>
+    <div class="stat"><span>Avg speed</span><b id="av">0</b></div>
+    <div class="stat"><span>Max speed</span><b id="mx">0</b></div>
+  </div>
+  <div class="card"><svg id="map" class="map" viewBox="0 0 400 260"></svg></div>
+</section>
+
+<section id="v-trips" class="hide">
+  <div class="card hide" id="detail">
+    <div class="row"><b id="dt-title"></b><button class="sm" id="dt-close">Close</button></div>
+    <svg id="map2" class="map" viewBox="0 0 400 260" style="margin:10px 0"></svg>
+    <div class="grid" id="dt-stats"></div>
+  </div>
+  <div class="card" id="list"></div>
+</section>
+
+<section id="v-acct" class="hide">
+  <div class="card">
+    <b>Storage</b>
+    <p class="mute">You're not signed in. Trips are saved on this phone only (in this browser).</p>
+    <p class="mute">iCloud sign-in isn't available in this version: it requires an Apple Developer account and server setup. To back up, use Copy backup and paste it into Notes (it syncs via iCloud).</p>
+    <div class="row" style="gap:8px;margin-top:8px">
+      <button class="sm" id="exp">Copy backup</button>
+      <button class="sm" id="imp">Restore from clipboard</button>
+    </div>
+    <div class="row" style="margin-top:14px"><span>Units</span><button class="sm" id="unit">km/h</button></div>
+  </div>
+</section>
+
+<nav>
+  <button data-v="track" class="on">Track</button>
+  <button data-v="trips">Trips</button>
+  <button data-v="acct">Account</button>
+</nav>
+
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)};
+var KEY='trips-v1',UK='unit-v1';
+var trips=[],mi=false,cur=null,watch=null,timer=null,wake=null;
+function load(){try{trips=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){trips=[]}try{mi=localStorage.getItem(UK)==='mi'}catch(e){}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(trips))}catch(e){$('msg').textContent='Could not save to this browser.'}}
+function saveU(){try{localStorage.setItem(UK,mi?'mi':'km')}catch(e){}}
+load();
+
+function sp(ms){return Math.round(ms*(mi?2.23694:3.6))}
+function dist(m){return ((m/1000)*(mi?0.621371:1)).toFixed(1)}
+function dur(s){s=Math.round(s/1000);var h=Math.floor(s/3600),m=Math.floor(s%3600/60),c=s%60;
+ return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(c).padStart(2,'0')}
+function hav(a,b){var R=6371000,r=Math.PI/180,dl=(b[0]-a[0])*r,dn=(b[1]-a[1])*r;
+ var x=Math.sin(dl/2)*Math.sin(dl/2)+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dn/2)*Math.sin(dn/2);
+ return 2*R*Math.asin(Math.sqrt(x))}
+function units(){var u=mi?'mph':'km/h';$('u1').textContent=u;$('unit').textContent=u}
+
+function draw(svg,pts,live){
+  var NS='http://www.w3.org/2000/svg',W=400,H=260,P=24;
+  svg.innerHTML='';
+  if(!pts.length){var t=document.createElementNS(NS,'text');t.setAttribute('x',200);t.setAttribute('y',135);t.setAttribute('text-anchor','middle');t.setAttribute('fill','currentColor');t.setAttribute('opacity','.5');t.textContent='Route will appear here';svg.appendChild(t);return}
+  var la=pts.map(function(p){return p[0]}),lo=pts.map(function(p){return p[1]});
+  var mnA=Math.min.apply(0,la),mxA=Math.max.apply(0,la),mnO=Math.min.apply(0,lo),mxO=Math.max.apply(0,lo);
+  var k=Math.cos((mnA+mxA)/2*Math.PI/180);
+  var w=Math.max((mxO-mnO)*k,1e-4),h=Math.max(mxA-mnA,1e-4);
+  var s=Math.min((W-2*P)/w,(H-2*P)/h);
+  var ox=(W-w*s)/2,oy=(H-h*s)/2;
+  function xy(p){return [ox+(p[1]-mnO)*k*s,H-oy-(p[0]-mnA)*s]}
+  var d=pts.map(function(p,i){var q=xy(p);return (i?'L':'M')+q[0].toFixed(1)+' '+q[1].toFixed(1)}).join('');
+  var path=document.createElementNS(NS,'path');
+  path.setAttribute('d',d);path.setAttribute('fill','none');path.setAttribute('stroke','var(--route)');path.setAttribute('stroke-width','4');path.setAttribute('stroke-linecap','round');path.setAttribute('stroke-linejoin','round');
+  svg.appendChild(path);
+  function dot(p,c){var q=xy(p),e=document.createElementNS(NS,'circle');e.setAttribute('cx',q[0]);e.setAttribute('cy',q[1]);e.setAttribute('r',7);e.setAttribute('fill',c);e.setAttribute('stroke','#fff');e.setAttribute('stroke-width','2');svg.appendChild(e)}
+  dot(pts[0],'#16a34a');
+  dot(pts[pts.length-1],live?'#2563eb':'#dc2626');
+}
+
+function upd(){
+  if(!cur){return}
+  if(cur.auto&&Date.now()-cur.lastMove>180000){endTrip(cur.lastMove);return}
+  var el=Date.now()-cur.start;
+  $('tm').textContent=dur(el);
+  $('ds').textContent=dist(cur.dist)+(mi?' mi':' km');
+  $('av').textContent=el>5000?sp(cur.dist/(el/1000)):0;
+  $('mx').textContent=sp(cur.max);
+}
+var auto=false,buf=[],fast=0;
+function onPos(p){
+  var c=p.coords;
+  $('gps').textContent='GPS: ±'+Math.round(c.accuracy)+' m · '+(c.speed==null?'speed n/a':sp(c.speed)+(mi?' mph':' km/h'))+(c.accuracy>60?' · signal too weak, skipping':'')+(cur?'':' · trip starts above '+(mi?'9 mph':'14 km/h'));
+  if(c.accuracy>60)return;
+  var pt=[+c.latitude.toFixed(6),+c.longitude.toFixed(6),Date.now()];
+  if(!cur){
+    var b=buf[buf.length-1],bv=c.speed;
+    if(bv==null||isNaN(bv))bv=b?hav(b,pt)/Math.max((pt[2]-b[2])/1000,1):0;
+    buf.push(pt);if(buf.length>4)buf.shift();
+    fast=bv>=4?fast+1:0;
+    if(fast>=2){var init=buf.slice();buf=[];fast=0;startTrip(init)}
+    return;
+  }
+  var last=cur.pts[cur.pts.length-1],v=c.speed;
+  if(last){
+    var d=hav(last,pt);
+    if(d<4&&(v==null||v<1))return;
+    cur.dist+=d;
+    if(v==null||isNaN(v))v=d/Math.max((pt[2]-last[2])/1000,1);
+  }
+  v=v||0;if(v>=1.5)cur.lastMove=Date.now();cur.spd=v;if(v>cur.max)cur.max=v;
+  cur.pts.push(pt);
+  $('spd').textContent=sp(v);
+  draw($('map'),cur.pts,true);upd();
+}
+function showBlocked(){
+  var ua=navigator.userAgent,ios=/iPhone|iPad|iPod/.test(ua),and=/Android/.test(ua);
+  $('perm-steps').textContent=ios?'Web pages can\'t open Settings for you, so please do this: tap the "aA" icon in Safari\'s address bar, choose Website Settings, set Location to Allow. If that is greyed out, go to Settings > Privacy & Security > Location Services and turn it on, then set Safari Websites to While Using the App.':and?'Web pages can\'t open Settings for you, so please do this: tap the lock or tune icon next to the address bar, open Permissions, and set Location to Allow. If it is still blocked, check Settings > Location is on.':'Web pages can\'t open Settings for you. Open this site\'s permissions from the lock icon in the address bar and set Location to Allow.';
+  $('perm-steps').textContent+=' If location is already allowed, the page may be open inside another app or a preview. Open this link directly in Safari or Chrome instead.';
+  $('perm').classList.remove('hide');
+  if(!cur)stopWatch();
+  if(auto){auto=false;autoUI();try{localStorage.setItem('auto-v1','0')}catch(e){}}
+  $('msg').textContent='';
+}
+$('perm-close').onclick=function(){$('perm').classList.add('hide')};
+$('perm-retry').onclick=function(){
+  $('perm').classList.add('hide');auto=true;autoUI();
+  try{localStorage.setItem('auto-v1','1')}catch(e){}
+  ensureWatch();$('msg').textContent='Checking location access…';
+};
+function onErr(e){
+  var em='GPS error '+e.code+(e.message?': '+e.message:'');
+  if(e.code===1&&!cur){showBlocked();$('gps').textContent=em;return}
+  $('gps').textContent=em;
+  $('msg').textContent=e.code===1?'Location was blocked. Allow it in your browser settings.':'Waiting for GPS signal…';
+}
+
+async function lock(){try{if(navigator.wakeLock)wake=await navigator.wakeLock.request('screen')}catch(e){}}
+function unlock(){try{if(wake)wake.release()}catch(e){}wake=null}
+
+function ensureWatch(){if(watch===null&&navigator.geolocation){$('gps').textContent='GPS: waiting for first signal…';watch=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:20000})}}
+function stopWatch(){if(watch!==null){navigator.geolocation.clearWatch(watch);watch=null}$('gps').textContent=''}
+function startTrip(init){
+  var t=init?init[0][2]:Date.now();
+  cur={id:t,start:t,dist:0,max:0,spd:0,pts:init||[],lastMove:Date.now(),auto:!!init};
+  if(init)for(var i=1;i<init.length;i++)cur.dist+=hav(init[i-1],init[i]);
+  $('msg').textContent=init?'Trip detected and started.':'Keep this screen open while driving.';
+  $('go').textContent='End trip';$('go').className='btn stop';
+  ensureWatch();timer=setInterval(upd,1000);lock();
+}
+function endTrip(endAt){
+  clearInterval(timer);unlock();
+  var end=endAt||Date.now();
+  if(cur.pts.length>1&&(!cur.auto||cur.dist>300)){trips.unshift({id:cur.id,start:cur.start,end:end,dist:cur.dist,max:cur.max,pts:cur.pts});save();$('msg').textContent='Trip saved.'}
+  else $('msg').textContent='Trip too short, not saved.';
+  cur=null;buf=[];fast=0;
+  $('go').textContent='Start trip';$('go').className='btn';$('spd').textContent='0';
+  if(auto)$('msg').textContent+=' Auto-detect is watching for your next trip.';else stopWatch();
+}
+$('go').onclick=function(){
+  if(!cur){
+    if(!navigator.geolocation){$('msg').textContent='GPS not supported here.';return}
+    startTrip();
+  }else endTrip();
+};
+function autoUI(){$('auto').textContent=auto?'On':'Off';$('auto').style.background=auto?'var(--acc)':'';$('auto').style.color=auto?'#fff':''}
+$('auto').onclick=function(){
+  auto=!auto;autoUI();
+  if(auto){try{navigator.permissions.query({name:'geolocation'}).then(function(r){if(r.state==='denied')showBlocked()})}catch(e){}}
+  try{localStorage.setItem('auto-v1',auto?'1':'0')}catch(e){}
+  if(auto&&!cur){ensureWatch();$('msg').textContent='Auto-detect on: a trip starts when you drive faster than about 14 km/h, and ends after 3 minutes stopped. Keep this page open.'}
+  else if(!auto&&!cur){stopWatch();$('msg').textContent=''}
+};
+document.addEventListener('visibilitychange',function(){if(cur&&document.visibilityState==='visible')lock()});
+
+function stats(t){
+  var el=t.end-t.start;
+  return [['Time',dur(el)],['Distance',dist(t.dist)+(mi?' mi':' km')],['Avg speed',sp(t.dist/(el/1000))+(mi?' mph':' km/h')],['Max speed',sp(t.max)+(mi?' mph':' km/h')]]
+   .map(function(a){return '<div class="stat"><span>'+a[0]+'</span><b>'+a[1]+'</b></div>'}).join('');
+}
+function renderList(){
+  var L=$('list');
+  if(!trips.length){L.innerHTML='<span class="mute">No trips yet. Start one from the Track tab.</span>';return}
+  L.innerHTML='';
+  trips.forEach(function(t){
+    var d=document.createElement('div');d.className='trip';
+    var el=t.end-t.start;
+    d.innerHTML='<div class="row"><div><b>'+new Date(t.start).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'</b><div class="mute">'+dist(t.dist)+(mi?' mi':' km')+' · '+dur(el)+' · max '+sp(t.max)+'</div></div><div><button class="sm v">View</button> <button class="sm x">Delete</button></div></div>';
+    d.querySelector('.v').onclick=function(){
+      $('detail').classList.remove('hide');
+      $('dt-title').textContent=new Date(t.start).toLocaleDateString([], {weekday:'long',month:'short',day:'numeric'});
+      draw($('map2'),t.pts,false);$('dt-stats').innerHTML=stats(t);window.scrollTo(0,0);
+    };
+    d.querySelector('.x').onclick=function(){
+      if(confirm('Delete this trip?')){trips=trips.filter(function(x){return x.id!==t.id});save();$('detail').classList.add('hide');renderList()}
+    };
+    L.appendChild(d);
+  });
+}
+$('dt-close').onclick=function(){$('detail').classList.add('hide')};
+
+document.querySelectorAll('nav button').forEach(function(b){
+  b.onclick=function(){
+    document.querySelectorAll('nav button').forEach(function(x){x.classList.toggle('on',x===b)});
+    ['track','trips','acct'].forEach(function(v){$('v-'+v).classList.toggle('hide',v!==b.dataset.v)});
+    if(b.dataset.v==='trips')renderList();
+  };
+});
+$('unit').onclick=function(){mi=!mi;saveU();units();renderList();upd()};
+$('exp').onclick=function(){
+  try{navigator.clipboard.writeText(JSON.stringify(trips)).then(function(){$('exp').textContent='Copied!'},function(){$('exp').textContent='Copy failed'})}catch(e){$('exp').textContent='Copy failed'}
+};
+$('imp').onclick=function(){
+  try{navigator.clipboard.readText().then(function(t){
+    var a=JSON.parse(t);if(!Array.isArray(a))throw 0;
+    var ids={};trips.forEach(function(x){ids[x.id]=1});
+    a.forEach(function(x){if(x&&x.pts&&!ids[x.id])trips.push(x)});
+    trips.sort(function(a,b){return b.start-a.start});save();$('imp').textContent='Restored!';
+  }).catch(function(){$('imp').textContent='Nothing valid to restore'})}catch(e){$('imp').textContent='Not supported'}
+};
+units();draw($('map'),[],false);
+try{auto=localStorage.getItem('auto-v1')==='1'}catch(e){}
+autoUI();if(auto){ensureWatch();$('msg').textContent='Auto-detect is watching for a trip. Keep this page open.'}
+})();
+</script>
+</body>
+</html>
