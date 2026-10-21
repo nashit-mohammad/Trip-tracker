@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Trip Tracker">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f5f7">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f1115">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
 <title>Trip Tracker</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
@@ -31,6 +39,8 @@ nav button.on{color:var(--acc)}
 .mute{color:var(--mute);font-size:13px}
 .sm{border:1px solid var(--line);background:none;color:var(--text);border-radius:10px;padding:6px 10px;font-size:13px}
 .hide{display:none}
+#upd{display:flex}
+#upd.hide{display:none}
 #lmap,#lmap2{position:relative;z-index:0}
 .swrap{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
 .swrap:last-child{border:0}
@@ -184,8 +194,20 @@ nav button.on{color:var(--acc)}
     </ol>
     <p class="mute" style="margin-top:10px">If your phone won't open the file, make it by hand: Shortcuts, +, Open URLs, and paste this page's address.</p>
   </div>
+  <div class="card" id="inst">
+    <b>Add to Home Screen</b>
+    <p class="mute">In Safari, tap Share, then Add to Home Screen. It opens full screen with its own icon.</p>
+    <p class="mute">Good to know: the Home Screen app keeps its own saved trips, separate from Safari. Your Driving shortcut opens Safari, so pick one, or move trips between them with Export and Import backup.</p>
+  </div>
+  <div class="card">
+    <b>About this app</b>
+    <div id="diag" style="margin-top:6px"></div>
+    <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-start;flex-wrap:wrap"><button class="sm" id="dg-ref">Refresh</button><button class="sm" id="dg-copy">Copy details</button><button class="sm" id="dg-upd">Check for update</button></div>
+    <div class="msg" id="dg-msg"></div>
+  </div>
 </section>
 
+<div id="upd" class="hide" style="position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 8px);z-index:40;background:#2563eb;color:#fff;border-radius:12px;padding:12px 14px;align-items:center;justify-content:space-between;gap:10px;box-shadow:0 6px 18px rgba(0,0,0,.3)"><span style="font-weight:600">A new version is ready</span><button class="sm" id="upd-go" style="background:#fff;color:#2563eb;border-color:#fff;font-weight:700;padding:8px 12px">Reload</button></div>
 <div class="toast hide" id="toast"></div>
 <nav>
   <button data-v="track" class="on">Track</button>
@@ -761,6 +783,62 @@ function rpInit(t){
   $('replay').classList.remove('hide');
   rpFrame();rpUI();
 }
+var BUILD='2026.10.20-1';
+var hadSW=!!(navigator.serviceWorker&&navigator.serviceWorker.controller),swState='not supported',persisted='unknown',gpsPerm='unknown',lastFix=null,lastUpdChk=0;
+function showUpd(){$('upd').classList.remove('hide')}
+$('upd-go').onclick=function(){location.reload()};
+function regSW(){
+  if(!('serviceWorker' in navigator)){swState='not supported';return}
+  swState='registering';
+  navigator.serviceWorker.register('sw.js').then(function(){swState='ready for offline use'},function(){swState='failed to start'});
+  navigator.serviceWorker.addEventListener('controllerchange',function(){if(hadSW)showUpd()});
+  if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().then(function(g){persisted=g?'granted':'not granted'},function(){});
+}
+function chkUpdate(force){
+  var n=Date.now();
+  if(!force&&n-lastUpdChk<600000)return Promise.resolve('skipped');
+  lastUpdChk=n;
+  if(navigator.onLine===false)return Promise.resolve('offline');
+  return fetch('index.html?_='+n,{cache:'no-store'}).then(function(r){return r.text()}).then(function(t){
+    var m=t.match(/var BUILD='([^']+)'/);
+    if(m&&m[1]!==BUILD){showUpd();return 'new version '+m[1]}
+    return 'you have the latest version';
+  }).catch(function(){return 'could not check'});
+}
+function esc(t){return String(t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function diagList(){
+  var standalone=(navigator.standalone===true)||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
+  var chars=0;try{chars=(localStorage.getItem(KEY)||'').length}catch(e){}
+  var aw=[];if(wake)aw.push('wake lock');if(nsOn)aw.push('backup video');
+  var ua=(navigator.userAgent.match(/OS ([0-9_]+)/)||[])[1];
+  return [
+    ['Build',BUILD],
+    ['Opened as',standalone?'Home Screen app':'Browser tab'],
+    ['GPS permission',gpsPerm],
+    ['Last GPS fix',lastFix?Math.round((Date.now()-lastFix.t)/1000)+' s ago, \u00b1'+Math.round(lastFix.a)+' m':'none yet'],
+    ['Screen kept awake',aw.length?aw.join(' + '):'no'],
+    ['Auto-detect',auto?'on':'off'],
+    ['Saved trips',trips.length+' ('+Math.round(chars/1024)+' KB, '+Math.round(chars/50000)+'% of about 5 MB)'],
+    ['Works offline',swState],
+    ['Storage protection',persisted],
+    ['Online',navigator.onLine===false?'no':'yes'],
+    ['Map library',HAS_L?'loaded':'not loaded'],
+    ['iOS version',ua?ua.replace(/_/g,'.'):'unknown']
+  ];
+}
+function diag(){
+  var rows=diagList(),h='';
+  rows.forEach(function(r){h+='<div class="row" style="padding:7px 0;border-top:1px solid var(--line);font-size:14px"><span class="mute">'+esc(r[0])+'</span><span style="text-align:right">'+esc(r[1])+'</span></div>'});
+  $('diag').innerHTML=h;
+  var st=(navigator.standalone===true)||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
+  $('inst').classList.toggle('hide',!!st);
+}
+$('dg-ref').onclick=diag;
+$('dg-copy').onclick=function(){
+  var t=diagList().map(function(r){return r[0]+': '+r[1]}).join('\n');
+  try{navigator.clipboard.writeText(t).then(function(){$('dg-msg').textContent='Copied. You can paste it into a message.'},function(){$('dg-msg').textContent='Could not copy.'})}catch(e){$('dg-msg').textContent='Could not copy.'}
+};
+$('dg-upd').onclick=function(){$('dg-msg').textContent='Checking\u2026';chkUpdate(true).then(function(r){$('dg-msg').textContent=r.charAt(0).toUpperCase()+r.slice(1)+'.'})};
 function upd(){
   if(!cur){return}
   ckpt();
@@ -775,6 +853,7 @@ var auto=false,buf=[],fast=0;
 function onPos(p){
   var c=p.coords;
   $('gps').textContent='GPS: ±'+Math.round(c.accuracy)+' m · '+(c.speed==null?'speed n/a':sp(c.speed)+(mi?' mph':' km/h'))+(c.accuracy>60?' · signal too weak, skipping':'')+(cur||!auto?'':' · trip starts above '+(mi?'9 mph':'14 km/h'));
+  lastFix={t:Date.now(),a:c.accuracy};
   showMe(c);
   if(c.accuracy>60)return;
   var pt=[+c.latitude.toFixed(6),+c.longitude.toFixed(6),Date.now()];
@@ -877,12 +956,14 @@ function initGeo(){
   if(!navigator.geolocation)return;
   if(!(navigator.permissions&&navigator.permissions.query)){ensureWatch();return}
   navigator.permissions.query({name:'geolocation'}).then(function(r){
+    gpsPerm=r.state;
     function go(){
       if(r.state==='denied'){showBlocked()}
       else{$('perm').classList.add('hide');ensureWatch()}
     }
     go();
     r.onchange=function(){
+      gpsPerm=r.state;
       if(r.state==='granted'){
         try{auto=localStorage.getItem('auto-v1')!=='0'}catch(e){auto=true}
         autoUI();$('perm').classList.add('hide');ensureWatch();
@@ -942,6 +1023,7 @@ document.addEventListener('visibilitychange',function(){
     }
   }
   if(cur||auto)lock();
+  chkUpdate(false);
 });
 document.addEventListener('touchstart',function(){
   if(!cur||!(cur.spd>=3))return;
@@ -1074,7 +1156,7 @@ document.querySelectorAll('nav button').forEach(function(b){
       if(openT)closeDetail();
       else{renderList();window.scrollTo(0,tabY.trips||0)}
     }else{
-      if(nv==='acct')bkInfo();
+      if(nv==='acct'){bkInfo();diag()}
       if(nv==='track'&&lm)lm.invalidateSize();
       window.scrollTo(0,tabY[nv]||0);
     }
@@ -1121,6 +1203,7 @@ $('impf').onchange=function(){
 };
 bkInfo();checkBk();
 units();initMaps();
+regSW();setTimeout(function(){chkUpdate(false)},4000);
 recover();
 try{auto=localStorage.getItem('auto-v1')!=='0'}catch(e){auto=true}
 autoUI();initGeo();if(auto){lock();$('msg').textContent='Auto-detect is watching for a trip. Keep this page open.'}
